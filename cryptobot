@@ -1,0 +1,129 @@
+#!/usr/bin/env perl
+
+use common::sense;
+
+use AnyEvent;
+use AnyEvent::HTTP;
+use AnyEvent::IRC::Client;
+use JSON::XS;
+
+
+my $cmd = shift;
+
+if ($cmd eq 'test') {
+  my $sender = shift;
+  my $msg = shift;
+
+  my $cv = AE::cv;
+
+  process($sender, $msg, sub {
+    my $response = shift;
+    print "OUTPUT: $response\n";
+    $cv->send;
+  });
+
+  $cv->wait;
+} elsif ($cmd eq 'serve') {
+  my $server = shift // usage("need irc server");
+  my $chan = shift // usage("need irc channel");
+  my $nick = shift // usage("need nick");
+  irc_client($server, $chan, $nick);
+} elsif (defined $cmd) {
+  usage("unknown command: $cmd");
+} else {
+  usage("please provide command");
+}
+
+
+sub usage {
+  my $reason = shift;
+
+  print <<'END';
+Usage: cryptbot <cmd> [args]
+  cryptobot serve <irc server> <channel> <nick>
+  cryptobot test <nick> <message>
+
+Examples:
+  cryptobot serve irc.choopa.net '#mychan' cbot123
+  cryptobot test jimmy '!q btc'
+END
+
+  print "\n** $reason **\n" if $reason;
+  exit 1;
+}
+
+
+sub irc_client {
+  my ($server, $chan, $nick) = @_;
+
+  my $cv = AE::cv;
+  my $con = new AnyEvent::IRC::Client;
+
+  $con->reg_cb(publicmsg => sub {
+    my ($con, $channel, $ircmsg) = @_; 
+
+    my $msg = $ircmsg->{params}->[1];
+    my $sender = $ircmsg->{prefix};
+    $sender =~ s/!.*$//;
+
+    process($sender, $msg, sub {
+      my $response = shift;
+      return if !defined $response;
+      print "  -> $response\n";
+      $con->send_chan($channel, PRIVMSG => ($channel, $response));
+    });
+  });
+
+  $con->connect($server, 6667, { nick => $nick } );
+  $con->send_srv(JOIN => ($chan) );
+
+  $cv->recv;
+  $con->disconnect;
+}
+
+
+sub process {
+  my ($sender, $msg, $cb) = @_;
+
+  return $cb->() unless $msg =~ m{^!};
+
+  print "$sender: $msg\n";
+
+  if ($msg =~ m{^!q (\S+)}) {
+    my $sym = lc($1);
+
+    http_get 'https://api.coinmarketcap.com/v1/ticker/', sub {
+      my ($data, $headers) = @_;
+
+      return $cb->() unless $headers->{Status} =~ /^2/;
+
+      my $prices = decode_json($data);
+
+      foreach my $quote (@$prices) {
+        if (lc($quote->{symbol}) eq $sym) {
+          my $pc1h = normalize_percent_change($quote->{percent_change_1h});
+          my $pc24h = normalize_percent_change($quote->{percent_change_24h});
+          my $pc7d = normalize_percent_change($quote->{percent_change_7d});
+
+          return $cb->("\x02$quote->{name}\x0F | 1 $quote->{symbol} = $quote->{price_usd} USD | 1h: $pc1h  24h: $pc24h  7d: $pc7d");
+        }
+      }
+    };
+  }
+
+  return;
+}
+
+
+sub normalize_percent_change {
+  my $pc = shift;
+  $pc = "+$pc" unless $pc =~ /^-/;
+
+  if ($pc =~ /^\+/) {
+    $pc = "\x0309$pc\x0F";
+  } else {
+    $pc = "\x0304$pc\x0F";
+  }
+
+  return $pc . '%';
+}
