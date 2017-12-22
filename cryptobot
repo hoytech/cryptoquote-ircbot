@@ -56,7 +56,7 @@ END
 
 
 sub irc_client {
-  my ($server, $chan, $nick) = @_;
+  my ($server, $chan_list, $nick) = @_;
 
   my $cv = AE::cv;
   my $con = new AnyEvent::IRC::Client;
@@ -79,7 +79,10 @@ sub irc_client {
   });
 
   $con->connect($server, 6667, { nick => $nick } );
-  $con->send_srv(JOIN => ($chan) );
+
+  foreach my $chan (split /,/, $chan_list) {
+    $con->send_srv(JOIN => $chan);
+  }
 
   $cv->recv;
   $con->disconnect;
@@ -97,32 +100,88 @@ sub process {
     my $sym_list = lc($1);
     my $syms = { map { $_ => 1, } split(/\s*,\s*/, $sym_list) };
 
-    http_get 'https://api.coinmarketcap.com/v1/ticker/', sub {
-      my ($data, $headers) = @_;
-
-      return $cb->() unless $headers->{Status} =~ /^2/;
-
-      my $prices = decode_json($data);
+    get_coinmarketcap(sub {
+      my ($prices) = @_;
+      return $cb->() unless $prices;
 
       my $output = [];
 
       foreach my $quote (@$prices) {
         if ($syms->{lc($quote->{symbol})}) {
-          my $pc1h = normalize_percent_change($quote->{percent_change_1h});
-          my $pc24h = normalize_percent_change($quote->{percent_change_24h});
-          my $pc7d = normalize_percent_change($quote->{percent_change_7d});
-
-          push @$output, "\x02$quote->{name}\x0F | 1 $quote->{symbol} = $quote->{price_usd} USD | 1h: $pc1h  24h: $pc24h  7d: $pc7d";
+          push @$output, render_quote($quote);
         }
       }
 
+      push @$output, "no symbol found" if !@$output;
+
       $cb->($output);
-    };
+    });
+  } elsif ($msg =~ m{^!movers (\S+)}) {
+    my $period = lc($1);
+    if ($period ne '1h' && $period ne '24h' && $period ne '7d') {
+      return $cb->(['invalid period (choose: 1h, 24h, 7d)']);
+    }
+
+    my $field = "percent_change_$period";
+
+    get_coinmarketcap(sub {
+      my ($prices) = @_;
+
+      $prices = [ sort { $b->{$field} <=> $a->{$field} } @$prices ];
+
+      my $output = [];
+
+      push @$output, render_quote($prices->[0]);
+      push @$output, render_quote($prices->[1]);
+      push @$output, render_quote($prices->[2]);
+      push @$output, render_quote($prices->[3]);
+      push @$output, '---';
+      push @$output, render_quote($prices->[-1]);
+      push @$output, render_quote($prices->[-2]);
+      push @$output, render_quote($prices->[-3]);
+      push @$output, render_quote($prices->[-4]);
+
+      $cb->($output);
+    });
   }
 
   return;
 }
 
+
+
+sub render_quote {
+  my $quote = shift;
+  my $pc1h = normalize_percent_change($quote->{percent_change_1h});
+  my $pc24h = normalize_percent_change($quote->{percent_change_24h});
+  my $pc7d = normalize_percent_change($quote->{percent_change_7d});
+
+  return "\x02$quote->{name}\x0F | 1 $quote->{symbol} = $quote->{price_usd} USD | 1h: $pc1h  24h: $pc24h  7d: $pc7d";
+}
+
+
+
+my $coinmarketcap_cache;
+my $coinmarketcap_last_time = 0;
+
+sub get_coinmarketcap {
+  my ($cb) = @_;
+
+  if (time() - $coinmarketcap_last_time < 60) {
+    return $cb->($coinmarketcap_cache);
+  }
+
+  http_get 'https://api.coinmarketcap.com/v1/ticker/', sub {
+    my ($data, $headers) = @_;
+    return $cb->() unless $headers->{Status} =~ /^2/;
+    my $prices = decode_json($data);
+    $coinmarketcap_cache = $prices;
+    $coinmarketcap_last_time = time();
+    $cb->($prices);
+  };
+
+  return;
+}
 
 sub normalize_percent_change {
   my $pc = shift;
