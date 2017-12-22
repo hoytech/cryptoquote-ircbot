@@ -18,7 +18,9 @@ if ($cmd eq 'test') {
 
   process($sender, $msg, sub {
     my $response = shift;
-    print "OUTPUT: $response\n";
+    for my $msg (@$response) {
+      print "OUTPUT: $msg\n";
+    }
     $cv->send;
   });
 
@@ -68,9 +70,11 @@ sub irc_client {
 
     process($sender, $msg, sub {
       my $response = shift;
-      return if !defined $response;
-      print "  -> $response\n";
-      $con->send_chan($channel, PRIVMSG => ($channel, $response));
+      return if !defined $response || @$response == 0;
+      for my $msg (@$response) {
+        print "  -> $msg\n";
+        $con->send_chan($channel, PRIVMSG => ($channel, $msg));
+      }
     });
   });
 
@@ -90,7 +94,8 @@ sub process {
   print "$sender: $msg\n";
 
   if ($msg =~ m{^!q (\S+)}) {
-    my $sym = lc($1);
+    my $sym_list = lc($1);
+    my $syms = { map { $_ => 1, } split(/\s*,\s*/, $sym_list) };
 
     http_get 'https://api.coinmarketcap.com/v1/ticker/', sub {
       my ($data, $headers) = @_;
@@ -99,15 +104,19 @@ sub process {
 
       my $prices = decode_json($data);
 
+      my $output = [];
+
       foreach my $quote (@$prices) {
-        if (lc($quote->{symbol}) eq $sym) {
+        if ($syms->{lc($quote->{symbol})}) {
           my $pc1h = normalize_percent_change($quote->{percent_change_1h});
           my $pc24h = normalize_percent_change($quote->{percent_change_24h});
           my $pc7d = normalize_percent_change($quote->{percent_change_7d});
 
-          return $cb->("\x02$quote->{name}\x0F | 1 $quote->{symbol} = $quote->{price_usd} USD | 1h: $pc1h  24h: $pc24h  7d: $pc7d");
+          push @$output, "\x02$quote->{name}\x0F | 1 $quote->{symbol} = $quote->{price_usd} USD | 1h: $pc1h  24h: $pc24h  7d: $pc7d";
         }
       }
+
+      $cb->($output);
     };
   }
 
