@@ -80,7 +80,7 @@ sub irc_client {
 
   $con->connect($server, 6667, { nick => $nick } );
 
-  foreach my $chan (split /,/, $chan_list) {
+  foreach my $chan (split /\s*,\s*/, $chan_list) {
     $con->send_srv(JOIN => $chan);
   }
 
