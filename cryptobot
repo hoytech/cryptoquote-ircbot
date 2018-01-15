@@ -96,7 +96,7 @@ sub process {
 
   print "$sender: $msg\n";
 
-  if ($msg =~ m{^!q (\S+)}) {
+  if ($msg =~ m{^!q (.+)}) {
     my $sym_list = lc($1);
     my $syms = { map { $_ => 1, } split(/\s*,\s*/, $sym_list) };
 
