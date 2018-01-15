@@ -16,7 +16,7 @@ if ($cmd eq 'test') {
 
   my $cv = AE::cv;
 
-  process($sender, $msg, sub {
+  process($sender, $msg, undef, sub {
     my $response = shift;
     for my $msg (@$response) {
       print "OUTPUT: $msg\n";
@@ -68,7 +68,7 @@ sub irc_client {
     my $sender = $ircmsg->{prefix};
     $sender =~ s/!.*$//;
 
-    process($sender, $msg, sub {
+    process($sender, $msg, $con, sub {
       my $response = shift;
       return if !defined $response || @$response == 0;
       for my $msg (@$response) {
@@ -90,7 +90,7 @@ sub irc_client {
 
 
 sub process {
-  my ($sender, $msg, $cb) = @_;
+  my ($sender, $msg, $con, $cb) = @_;
 
   return $cb->() unless $msg =~ m{^!};
 
@@ -143,6 +143,8 @@ sub process {
 
       $cb->($output);
     });
+  } elsif ($msg =~ m{^!join (#[\w_.]+)}) {
+    $con->send_srv(JOIN => $1);
   }
 
   return;
