@@ -9,6 +9,7 @@ use JSON::XS;
 
 
 my $cmd = shift;
+my ($api_key) = @ARGV;
 
 if ($cmd eq 'test') {
   my $sender = shift;
@@ -32,6 +33,8 @@ if ($cmd eq 'test') {
   irc_client($server, $chan, $nick);
 } elsif (defined $cmd) {
   usage("unknown command: $cmd");
+} elsif (defined $api_key) {
+  usage("need api_key");
 } else {
   usage("please provide command");
 }
@@ -173,10 +176,11 @@ sub get_coinmarketcap {
     return $cb->($coinmarketcap_cache);
   }
 
-  http_get 'https://api.coinmarketcap.com/v1/ticker/', sub {
+  http_get "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?CMC_PRO_API_KEY=${api_key}", sub {
     my ($data, $headers) = @_;
     return $cb->() unless $headers->{Status} =~ /^2/;
     my $prices = decode_json($data);
+    $prices = $prices{'data'};
     $coinmarketcap_cache = $prices;
     $coinmarketcap_last_time = time();
     $cb->($prices);
