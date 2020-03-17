@@ -8,8 +8,8 @@ use AnyEvent::IRC::Client;
 use JSON::XS;
 
 
-my $cmd = shift;
-my ($api_key) = @ARGV;
+my $cmd = shift || usage("please provide command");
+my $api_key = $ENV{CMC_API_KEY} || usage("need CMC_API_KEY env var");
 
 if ($cmd eq 'test') {
   my $sender = shift;
@@ -31,12 +31,8 @@ if ($cmd eq 'test') {
   my $chan = shift // usage("need irc channel");
   my $nick = shift // usage("need nick");
   irc_client($server, $chan, $nick);
-} elsif (defined $cmd) {
-  usage("unknown command: $cmd");
-} elsif (defined $api_key) {
-  usage("need api_key");
 } else {
-  usage("please provide command");
+  usage("unknown command: $cmd");
 }
 
 
@@ -156,12 +152,14 @@ sub process {
 
 
 sub render_quote {
-  my $quote = shift;
+  my $info = shift;
+  my $quote = $info->{quote}->{USD};
+
   my $pc1h = normalize_percent_change($quote->{percent_change_1h});
   my $pc24h = normalize_percent_change($quote->{percent_change_24h});
   my $pc7d = normalize_percent_change($quote->{percent_change_7d});
 
-  return "\x02$quote->{name}\x0F | 1 $quote->{symbol} = $quote->{price_usd} USD | 1h: $pc1h  24h: $pc24h  7d: $pc7d";
+  return "\x02$info->{name}\x0F | 1 $info->{symbol} = $quote->{price} USD | 1h: $pc1h  24h: $pc24h  7d: $pc7d";
 }
 
 
@@ -180,7 +178,7 @@ sub get_coinmarketcap {
     my ($data, $headers) = @_;
     return $cb->() unless $headers->{Status} =~ /^2/;
     my $prices = decode_json($data);
-    $prices = $prices{'data'};
+    $prices = $prices->{'data'};
     $coinmarketcap_cache = $prices;
     $coinmarketcap_last_time = time();
     $cb->($prices);
